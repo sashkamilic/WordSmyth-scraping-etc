@@ -20,8 +20,6 @@ sys.setdefaultencoding('utf-8')
 
 tokenizer = RegexpTokenizer(r'\w+') # no punctuation
 
-NUM_PROCESSES = 8
-OUTDIR = './semcor_convert3'
 #STOPWORDS = frozenset(stopwords.words('english'))
 
 def homonym_urls(word):
@@ -31,11 +29,11 @@ def homonym_urls(word):
 
     ***A word is considered a homonym if it has more than one definition on WordSmyth.
     '''
-    url = "https://www.wordsmyth.net/?level=3&ent={}".format(word)
+    url = "https://www.wordsmyth.net/?level=3&ent={}".format(word.replace(' ', '_'))
     #filename = wget.download(url, out='{}.html'.format(uuid.uuid4().hex))
     #page = open(filename).read()
     try:
-        time.sleep(3)
+        #time.sleep(4)
         response = urllib2.urlopen(url)
     except urllib2.HTTPError, e:
         print(word, e)
@@ -56,10 +54,83 @@ def homonym_urls(word):
             if text == word:
                 href = td.find_all('a', href=True)[0]['href'] 
                 results.append(href)
-            elif text[0] != '-' or text[-1] != '-':
+            elif text[0] != u'-' and text[-1] != u'-':
                 derived = True
                 
     return derived, results
+
+
+def suffix_urls(word):
+    '''
+    Return urls of word definitions of a homonym.
+    Return False if word is not a homonym.
+
+    ***A word is considered a homonym if it has more than one definition on WordSmyth.
+    '''
+    url = "https://www.wordsmyth.net/?level=3&ent={}".format(word.replace(' ', '_'))
+    #filename = wget.download(url, out='{}.html'.format(uuid.uuid4().hex))
+    #page = open(filename).read()
+    try:
+        #time.sleep(4)
+        response = urllib2.urlopen(url)
+    except urllib2.HTTPError, e:
+        print(word, e)
+        return None
+    page = response.read()
+    soup = BeautifulSoup(page, 'html.parser')
+    #os.remove(filename)
+    #if len(soup.find_all('div', class_ = "more")) == 0:
+    #    return []
+    results = []
+    if not soup.find('div', class_ = "wordlist"):
+        return None
+    tbody = soup.find('div', class_ = "wordlist").table.tbody
+    for td in tbody.find_all('td'):
+        if td.find('a'):
+            text = td.find('a').find(text=True, recursive=False)
+            if text == word:
+                href = td.find_all('a', href=True)[0]['href'] 
+                results.append(href)
+                
+    return results
+
+
+def get_homonym_url(word, num):
+    '''
+    Return urls of word definitions of a homonym.
+    Return False if word is not a homonym.
+
+    ***A word is considered a homonym if it has more than one definition on WordSmyth.
+    '''
+    url = "https://www.wordsmyth.net/?level=3&ent={}".format(word.replace(' ', '_'))
+    #filename = wget.download(url, out='{}.html'.format(uuid.uuid4().hex))
+    #page = open(filename).read()
+    try:
+        #time.sleep(1)
+        response = urllib2.urlopen(url)
+    except urllib2.HTTPError, e:
+        print(word, e)
+        return [False, []]
+    page = response.read()
+    soup = BeautifulSoup(page, 'html.parser')
+    #os.remove(filename)
+    #if len(soup.find_all('div', class_ = "more")) == 0:
+    #    return []
+    results = []
+    derived = False
+    if not soup.find('div', class_ = "wordlist"):
+        return derived, []
+    tbody = soup.find('div', class_ = "wordlist").table.tbody
+    for td in tbody.find_all('td'):
+        if td.find('a'):
+            text = ''.join(td.find('a').findAll(text=True, recursive=True))
+            href = td.find_all('a', href=True)[0]['href']
+            if text == word + num:
+                return(href)
+            elif text == word and num == "1":
+                return(href)
+
+    assert False, "should have returned something"
 
 
 def urls2(word):
@@ -69,10 +140,10 @@ def urls2(word):
 
     ***A word is considered a homonym if it has more than one definition on WordSmyth.
     '''
-    url = "https://www.wordsmyth.net/?level=3&ent={}".format(word.replace(" ", "%20"))
+    url = "https://www.wordsmyth.net/?level=3&ent={}".format(word.replace(" ", "_"))
     #filename = wget.download(url, out='{}.html'.format(uuid.uuid4().hex))
     #page = open(filename).read()
-    time.sleep(3)
+    #time.sleep(1)
     response = urllib2.urlopen(url)
     page = response.read()
     soup = BeautifulSoup(page, 'html.parser')
@@ -84,19 +155,42 @@ def urls2(word):
         return None
     tbody = soup.find('div', class_ = "wordlist").table.tbody
     potential_derived = False
+
     for td in tbody.find_all('td'):
         if td.find('a'):
-            text = td.find('a').find(text=True, recursive=False)
-            results.append(text)
+            first_word = td.find('a').find(text=True, recursive=False)
+            break
+
+    tbody = soup.find('div', class_ = "wordlist").table.tbody
+    for td in tbody.find_all('td'):
+        if td.find('a'):
+            url = td.find('a').get('href')
+            def_string = td.find('a').findNext('td').text
+            text = ''.join(td.find('a').findAll(text=True, recursive=True)).strip()
+
+
+            #results.append(text)
             if text[0] != "-" and text[-1] != "-":
-                if text != word:
+                #if text != first_word:
+                if True:
                     potential_derived = True
+                    
+                    reason = "unknown"
+
+                    if text.lower()[0] != text[0]:
+                        reason = "capitalization"
+                    elif is_participle(def_string):
+                        reason = "participle"
+                    elif "." in text:
+                        reason = "period"
+
+                    results.append((text, url, reason))
             '''
             if td.find('a').find(text=True, recursive=False) == word:
                 results.append(td.find('a').get('href'))
             '''
     if potential_derived:
-        return [word] + results
+        return results
 
 
 def definitions(url, pos=False):
@@ -106,7 +200,7 @@ def definitions(url, pos=False):
     '''
 
     try:
-        time.sleep(3)
+        #time.sleep(1)
         response = urllib2.urlopen(url)
     except urllib2.HTTPError, e:
         print(url, e)
@@ -134,13 +228,41 @@ def definitions(url, pos=False):
 
             if tr.get("class")[0] == "definition":
                 def_ = tr.find("td", attrs={'class': 'data'}).find_all(text=True, recursive=False)[0]
-                # update bag with words from definition
-                defs[cur_pos].append(' '.join([t.lower() for t in tokenizer.tokenize(def_)]))
+                if is_participle(def_):
+                    full_def = ''.join(tr.find("td", attrs={'class': 'data'}).find_all(text=True, recursive=True))
+                    m = re.search(r" of (?:<strong>)?(?:\")?(\w+)(?:\")?(?:</strong>)?", full_def)
+                    original_word = m.group(1)
+                    if original_word[-1].isnumeric():
+                        m = re.match('([A-Za-z]+)([0-9]+)', original_word)
+                        original_word = m.group(1)
+                        num = m.group(2)
+                        url = get_homonym_url(original_word, num)
+                    else:
+                        url = "https://www.wordsmyth.net/?level=3&ent={}".format(original_word.replace(" ", "_"))
+                    defs_ = definitions(url, pos=True)
+                    if not defs_:
+                        defs_ = {}
+                        derived, urls = homonym_urls(original_word)
+                        for url in urls:
+                            defs_.update(definitions(url, pos=True))
+                    for k in defs_.keys():
+                        if 'verb' not in k:
+                            del defs_[k]
+                    defs.update(defs_)
+                else: 
+                    # update bag with words from definition
+                    defs[cur_pos].append(' '.join([t.lower() for t in tokenizer.tokenize(def_)]))
 
     # remove stopwords
     # bag -= STOPWORDS
     # stem words
     # bag = set([stem(w) for w in bag])
+
+    # remove pos's with empty definition (due to being replaced with participle)
+    for pos in defs.keys():
+        if not defs[pos]:
+            del defs[pos]
+
     if not pos:
         return flatten(defs.values())
     return defs
@@ -271,53 +393,124 @@ def derived_forms():
 
 
 def get_all_definitions(wordlist, letter):
-
-    out1 = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMITH2/homonyms.{}.txt'.format(letter), 'w')
-    out2 = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMITH2/non_homonyms.{}.txt'.format(letter), 'w')
-    out3 = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMITH2/derived.{}.txt'.format(letter), 'w')
-
+    #'''
+    out1 = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMITH2/homonyms.{}.7.txt'.format(letter), 'w')
+    out2 = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMITH2/non_homonyms.{}.7.txt'.format(letter), 'w')
+    out3 = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMITH2/derived.{}.7.txt'.format(letter), 'w')
+    out4 = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMITH2/derived.meta.{}.7.txt'.format(letter), 'w')
+    #'''
     #wordlist = sorted(wordlist, reverse=True)
     n = float(len(wordlist))
 
     for i,word in enumerate(wordlist):
 
+        while word[-1].isdigit():# and len(word) >= 2 and word[-2] == '.':
+            word = word[:-1]
+
+        print(word)
+
+        #suffix or prefix
+        if word[0] == '-' or word[-1] == '-':
+
+            urls = suffix_urls(word)
+            if not urls:
+                url_ = "https://www.wordsmyth.net/?level=3&ent={}".format(word)
+                try:
+                    urls = [definitions(url_, pos=True)]
+                except AttributeError:
+                    print("Error: ", url)
+                    continue
+
+            for url in urls:
+                try:
+                    defs = definitions(url, pos=True)
+                except AttributeError:
+                    print("Error: ", url)
+                    continue
+                if not defs:
+                    print("no def [3]: ", word)
+                    continue
+                out2.write('#{}'.format(word) + '\n') 
+                #print('#{}'.format(word)) 
+                for pos in defs.keys():
+                    for d in defs[pos]:
+                        sentence = '{}\t{}\n'.format(pos, d)
+                        out2.write(sentence)
+                        #print(sentence)
+            continue
+
+
         if int(round(i / n, 5) * 100000) % 10 == 0:
             print("{}\t{}".format(letter, round(i / n, 2)))
-             
+    
+        #print(word)         
 
         '''
         if i < 2774:
             continue
         '''
-        m = re.match('([A-Za-z]+)', word)
+        '''
+        m = re.match('.*([0-9]*)', word)
         if not m:
             continue
         word = m.group(1)
+        '''
+
 
         result = urls2(word)
         if result:
             # derived form
-            out3.write('\t'.join(w for w in result) + '\n')
+            #out3.write('\t'.join(w for w in result) + '\n')
+            for w,url,reason in result:
+                # 1. write to regular file
+                #url = "https://www.wordsmyth.net/?level=3&ent={}".format(w)
+                defs = definitions(url, pos=True)
+                if not defs:
+                    print("no def [1]: ", word)
+                    continue
+                
+                out3.write('#{}'.format(w) + '\n') 
+                #print('#{}'.format(word)) 
+                for pos in defs.keys():
+                    for d in defs[pos]:
+                        sentence = '{}\t{}\n'.format(pos, d)
+                        out3.write(sentence)
+                        #print(sentence)
+
+                # 2. (TODO) write to meta file        
+                indices = ["participle", "period", "capitalization", "unknown"]
+                i = indices.index(reason)
+                l = [0, 0, 0, 0]
+                l[i] = 1
+                out4.write("{}\t{}\t{}\t{}\t{}\n".format(w, *l))
+            continue
+ 
         derived, urls = homonym_urls(word)
+        #print(derived, urls)
         if not derived and len(urls) > 1:
             # word is a homonym
             for i,url in enumerate(urls, start=1):
-                out1.write('#{}.{}'.format(word, i) + '\n')
+                out1.write('#{}{}'.format(word, i) + '\n')
+                #print('#{}.{}'.format(word, i))
                 defs = definitions(url, pos=True)
                 for pos in defs.keys():
                     for d in defs[pos]:
                         out1.write('{}\t{}\n'.format(pos, d))
+                        #print('{}\t{}\n'.format(pos, d))
             continue
         # at this point, only non-homonym, non-derived forms remaining
-        url = "https://www.wordsmyth.net/?level=3&ent={}".format(word)
+        url = "https://www.wordsmyth.net/?level=3&ent={}".format(word.replace(" ", "_"))
         defs = definitions(url, pos=True)
         if not defs:
+            print("no def [2]: ", word)
             continue
         out2.write('#{}'.format(word) + '\n') 
+        #print('#{}'.format(word)) 
         for pos in defs.keys():
             for d in defs[pos]:
                 sentence = '{}\t{}\n'.format(pos, d)
                 out2.write(sentence)
+                #print(sentence)
 
 
 
@@ -341,6 +534,19 @@ def scrape_all_words(outfile):
         if arrow_div:
             url = arrow_div.a.get('href')
 
+def is_participle(def_string):
+    strings = [
+        "past tense of",
+        "present tense of",
+        "past participle of",
+        "part participle of",
+        "present participle of"
+    ]
+    for s in strings:
+        if s in def_string:
+            return True
+    return False
+
 
 if __name__ == "__main__":
     #main()
@@ -354,19 +560,49 @@ if __name__ == "__main__":
     #derived_forms()
     #filename = '/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMYTH/all_wordsmyth_words.txt'
     #scrape_all_words(filename)
-    master_wordlist = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMYTH/all_wordsmyth_words.txt').readlines()
+
+    #'''
+    master_wordlist = open('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMYTH/remaining_words.3.txt').readlines()
     master_wordlist = [w.strip() for w in master_wordlist]
     #get_all_definitions('/u/sasa/sasa/HOMONOMY_POLYSEMY/WORDSMYTH/all_wordsmyth_words.txt')
 
     alphabet = collections.defaultdict(list)
     for word in master_wordlist:
         alphabet[word[0].upper()].append(word)
-    
+
+    #TODO: remove
+    #alphabet = {'A': ["propionic acid"]}
+    #print(alphabet.keys())
+   
     jobs = []
-    #k = 'R'
-    #l = ['Zephaniah']
-    for k,l in alphabet.items():
+    '''
+    k = 'xxx'
+    l = [
+        'stole', 'rung', 'wrung', 'cleft', 'flung',
+        'undone', 'strapping', 'taxis', 'dove', 'shook',
+        'affected', 'bent', 'boxing', 'stove', 'bore',
+        'bore', 'fold', 'dug', 'gum', 'bound', 'wound',
+        'boring', 'drove', 'rent', 'spoke', 'hiding',
+        'tanner', 'strapping', 'smelt', 'peaked', 'slew',
+        'rung', 'spat', 'rating', 'undone', 'mat', 'arch',
+        'prop', 'sounding', 'flatter', 'lining', 'cottage',
+        'stole', 'ground', 'lying', 'meter'
+    ]
+    '''
+    #k = 'xxx'
+    #l = ['break even']
+    #url = "https://www.wordsmyth.net/?level=3&ent=mummification"
+    #result = definitions(url, pos=True)
+    #print(result)
+    #urls = urls2("break even")
+    #print(urls)    
+
+    #print(definitions('-ar'))
+    get_all_definitions(master_wordlist, 'XXXX')    
+    '''
+    for k,l in sorted(alphabet.items(), reverse=True):
         p = multiprocessing.Process(target=get_all_definitions, args=(l,k))
         jobs.append(p)
         p.start()
+    #'''
 
